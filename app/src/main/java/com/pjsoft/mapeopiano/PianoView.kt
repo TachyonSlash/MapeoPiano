@@ -25,7 +25,7 @@ class PianoView @JvmOverloads constructor(
     private val whiteKeysPressed = BooleanArray(NUM_WHITE_KEYS)
     private val blackKeysPressed = BooleanArray(BLACK_KEYS_PATTERN.size)
 
-    // 🎨 Colores
+    //  Colores
     private val whiteKeyPaint = Paint().apply {
         color = Color.WHITE
         style = Paint.Style.FILL
