@@ -6,6 +6,7 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.floor
+
 class PianoView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
@@ -13,7 +14,7 @@ class PianoView @JvmOverloads constructor(
 
     private val NUM_WHITE_KEYS = 14
 
-    // Patrón estándar de teclas negras (para un grupo de 14 teclas)
+    // Patrón de teclas negras (para 14 teclas blancas)
     private val BLACK_KEYS_PATTERN = booleanArrayOf(
         true, true, false,
         true, true, true, false,
@@ -21,11 +22,21 @@ class PianoView @JvmOverloads constructor(
         true, true, true, false
     )
 
-    // Estado de teclas (blancas y negras)
+    // Estado de teclas
     private val whiteKeysPressed = BooleanArray(NUM_WHITE_KEYS)
     private val blackKeysPressed = BooleanArray(BLACK_KEYS_PATTERN.size)
 
-    //  Colores
+    private val fingerPaint = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.FILL
+    }
+
+
+    // Posición del dedo desde la cámara
+    private var fingerX = -1f
+    private var fingerY = -1f
+
+    // ====== COLORES ======
     private val whiteKeyPaint = Paint().apply {
         color = Color.WHITE
         style = Paint.Style.FILL
@@ -33,7 +44,7 @@ class PianoView @JvmOverloads constructor(
     }
 
     private val whiteKeyPressedPaint = Paint().apply {
-        color = Color.parseColor("#FFEB3B") // Amarillo suave
+        color = Color.parseColor("#FFEB3B")
         style = Paint.Style.FILL
     }
 
@@ -54,6 +65,51 @@ class PianoView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
+    // ============================================================
+    //              MÉTODO PARA MANO (MediaPipe)
+    // ============================================================
+    fun updateFingerPosition(x: Float, y: Float) {
+        fingerX = x
+        fingerY = y
+        detectKeyFromFinger()   // detectar teclas
+        invalidate()
+    }
+
+    private fun detectKeyFromFinger() {
+        if (fingerX < 0 || fingerY < 0) return
+
+        val whiteKeyWidth = width / NUM_WHITE_KEYS.toFloat()
+        val blackKeyWidth = whiteKeyWidth * 0.6f
+        val blackKeyHeight = height * 0.6f
+
+        // Resetar teclas
+        whiteKeysPressed.fill(false)
+        blackKeysPressed.fill(false)
+
+        // 1) Primero teclas negras (tienen prioridad visual)
+        for (i in BLACK_KEYS_PATTERN.indices) {
+            if (!BLACK_KEYS_PATTERN[i]) continue
+
+            val centerX = (i + 1) * whiteKeyWidth
+            val left = centerX - blackKeyWidth / 2
+            val right = centerX + blackKeyWidth / 2
+
+            if (fingerX in left..right && fingerY < blackKeyHeight) {
+                blackKeysPressed[i] = true
+                return
+            }
+        }
+
+        // 2) Si no tocó una negra, verificar blanca
+        val whiteIndex = floor(fingerX / whiteKeyWidth).toInt()
+        if (whiteIndex in 0 until NUM_WHITE_KEYS) {
+            whiteKeysPressed[whiteIndex] = true
+        }
+    }
+
+    // ============================================================
+    //              DIBUJO DEL PIANO
+    // ============================================================
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
@@ -61,7 +117,7 @@ class PianoView @JvmOverloads constructor(
         val blackKeyWidth = whiteKeyWidth * 0.6f
         val blackKeyHeight = height * 0.6f
 
-        // DIBUJAR TECLAS BLANCAS
+        // --- DIBUJAR TECLAS BLANCAS ---
         for (i in 0 until NUM_WHITE_KEYS) {
             val left = i * whiteKeyWidth
             val right = left + whiteKeyWidth
@@ -73,12 +129,11 @@ class PianoView @JvmOverloads constructor(
             canvas.drawRect(left, 0f, right, height.toFloat(), whiteKeyBorderPaint)
         }
 
-        // DIBUJAR TECLAS NEGRAS ENCIMA
+        // --- DIBUJAR TECLAS NEGRAS ---
         for (i in BLACK_KEYS_PATTERN.indices) {
             if (!BLACK_KEYS_PATTERN[i]) continue
 
-            val whiteKeyWidthF = width / NUM_WHITE_KEYS.toFloat()
-            val centerX = (i + 1) * whiteKeyWidthF
+            val centerX = (i + 1) * whiteKeyWidth
             val left = centerX - blackKeyWidth / 2
             val right = centerX + blackKeyWidth / 2
 
@@ -87,8 +142,16 @@ class PianoView @JvmOverloads constructor(
 
             canvas.drawRect(left, 0f, right, blackKeyHeight, paintToUse)
         }
+
+        if (fingerX >= 0 && fingerY >= 0) {
+            canvas.drawCircle(fingerX, fingerY, 20f, fingerPaint)
+        }
+
     }
 
+    // ============================================================
+    //              SOPORTE A TOCAR CON EL DEDO
+    // ============================================================
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x
         val y = event.y
@@ -98,13 +161,11 @@ class PianoView @JvmOverloads constructor(
         val blackKeyHeight = height * 0.6f
 
         when (event.action) {
-
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                // RESET all keys
                 whiteKeysPressed.fill(false)
                 blackKeysPressed.fill(false)
 
-                // Primero verificar negras (tienen prioridad)
+                // Teclas negras primero
                 for (i in BLACK_KEYS_PATTERN.indices) {
                     if (!BLACK_KEYS_PATTERN[i]) continue
 
@@ -119,17 +180,16 @@ class PianoView @JvmOverloads constructor(
                     }
                 }
 
-                // Si no fue negra → verificar blanca
-                val whiteIndex = floor(x / whiteKeyWidth).toInt()
-                if (whiteIndex in 0 until NUM_WHITE_KEYS) {
-                    whiteKeysPressed[whiteIndex] = true
+                // Teclas blancas
+                val index = floor(x / whiteKeyWidth).toInt()
+                if (index in 0 until NUM_WHITE_KEYS) {
+                    whiteKeysPressed[index] = true
                 }
 
                 invalidate()
             }
 
             MotionEvent.ACTION_UP -> {
-                // Soltar todo
                 whiteKeysPressed.fill(false)
                 blackKeysPressed.fill(false)
                 invalidate()

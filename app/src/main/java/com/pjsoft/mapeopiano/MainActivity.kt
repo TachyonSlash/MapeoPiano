@@ -134,6 +134,13 @@ class MainActivity : ComponentActivity() {
             val index = hand[8]
 
             println("Index finger: x=${index.x()}, y=${index.y()}")
+
+            pianoView.post {
+                pianoView.updateFingerPosition(
+                    index.x() * pianoView.width,
+                    index.y() * pianoView.height
+                )
+            }
         }
     }
 
@@ -201,3 +208,4 @@ class MainActivity : ComponentActivity() {
         return out
     }
 }
+
