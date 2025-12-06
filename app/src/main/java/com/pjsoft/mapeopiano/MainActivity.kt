@@ -6,6 +6,7 @@ import android.graphics.*
 import android.graphics.ImageFormat
 import android.media.Image
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
@@ -17,12 +18,11 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.google.mediapipe.framework.image.BitmapImageBuilder
-import com.google.mediapipe.framework.image.MPImage
+import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker.HandLandmarkerOptions
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.vision.core.RunningMode
 import java.io.ByteArrayOutputStream
 import kotlin.concurrent.thread
 
@@ -31,6 +31,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraPreview: PreviewView
     private lateinit var pianoView: PianoView
     private lateinit var handLandmarker: HandLandmarker
+
+    // detector puro (no requiere OpenCV)
+    private val pianoDetector = PianoDetector()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +58,8 @@ class MainActivity : ComponentActivity() {
                 if (granted) {
                     setupHandDetector()
                     startCamera()
+                } else {
+                    Log.e("MainActivity", "Permiso de cámara denegado")
                 }
             }
             launcher.launch(Manifest.permission.CAMERA)
@@ -70,13 +75,12 @@ class MainActivity : ComponentActivity() {
             .setBaseOptions(baseOptions)
             .setNumHands(1)
             .setRunningMode(RunningMode.LIVE_STREAM)
-            // Listener con 2 parámetros (result, image) para LIVE_STREAM
-            .setResultListener { result: HandLandmarkerResult, image: MPImage ->
-                // manejar resultado en hilo del callback nativo
+            .setResultListener { result: HandLandmarkerResult, _: Any? ->
+                // Nota: la firma puede variar por versión; aquí sólo usamos result
                 handleHandResult(result)
             }
             .setErrorListener { e: Throwable ->
-                e.printStackTrace()
+                Log.e("HandLandmarker", "Error: ${e.message}", e)
             }
             .build()
 
@@ -119,22 +123,98 @@ class MainActivity : ComponentActivity() {
         }
 
         thread {
+            // 1) convertir a Bitmap (tu función actual)
             val bitmap = imageProxyToBitmap(imageProxy)
+
             if (bitmap != null) {
+                // 2) enviar a MediaPipe (detección de manos)
                 val mpImage = BitmapImageBuilder(bitmap).build()
                 handLandmarker.detectAsync(mpImage, imageProxy.imageInfo.timestamp)
+
+                // 3) detectar piano (con PianoDetector puro)
+                val detectedRect = pianoDetector.detectPianoRect(bitmap)
+                if (detectedRect != null) {
+                    Log.i("PianoDetector", "Piano detectado: $detectedRect")
+                    // manda rect en coordenadas del bitmap; PianoView debe convertir si es necesario
+                    pianoView.post {
+                        pianoView.updateDetectedPianoRect(detectedRect)
+                    }
+                    // Opcional: detectar keys y mandarlas al pianoView
+                    val keys = pianoDetector.detectKeys(bitmap, detectedRect)
+                    pianoView.post {
+                        pianoView.updateDetectedKeys(keys)
+                    }
+                }
             }
+
             imageProxy.close()
         }
     }
+
+    fun detectKeys(src: Bitmap, pianoRect: Rect): List<DetectedKey> {
+        val w = src.width
+        val h = src.height
+
+        val gray = bitmapToGray(src)
+
+        val px = pianoRect.left
+        val py = pianoRect.top
+        val pw = pianoRect.width()
+        val ph = pianoRect.height()
+
+        if (pw <= 0 || ph <= 0) return emptyList()
+
+        val whiteKeyCount = 52  // moderno, 88 teclas totales
+        val keyWidth = pw.toFloat() / whiteKeyCount
+
+        val result = mutableListOf<DetectedKey>()
+
+        for (i in 0 until whiteKeyCount) {
+            val x1 = (px + i * keyWidth).toInt()
+            val x2 = (px + (i + 1) * keyWidth).toInt()
+
+            val y1 = py
+            val y2 = py + ph
+
+            // medir oscuridad (solo parte superior)
+            var sum = 0
+            var count = 0
+
+            val sampleTop = (ph * 0.25f).toInt()
+
+            for (y in y1 until (y1 + sampleTop)) {
+                for (x in x1 until x2) {
+                    val idx = y * w + x
+                    if (idx in gray.indices) {
+                        sum += gray[idx]
+                        count++
+                    }
+                }
+            }
+
+            val avg = if (count > 0) sum / count else 255
+
+            val isBlack = avg < 80  // umbral de oscuridad típico para teclas negras
+
+            result.add(
+                DetectedKey(
+                    index = i,
+                    rect = RectF(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat()),
+                    isBlack = isBlack
+                )
+            )
+        }
+
+        return result
+    }
+
 
     private fun handleHandResult(result: HandLandmarkerResult) {
         if (result.landmarks().isNotEmpty()) {
             val hand = result.landmarks()[0]
             val index = hand[8]
 
-            println("Index finger: x=${index.x()}, y=${index.y()}")
-
+            // convierte coordenadas normalizadas -> pixeles de PreviewView
             pianoView.post {
                 pianoView.updateFingerPosition(
                     index.x() * pianoView.width,
@@ -208,4 +288,3 @@ class MainActivity : ComponentActivity() {
         return out
     }
 }
-

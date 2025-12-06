@@ -3,199 +3,143 @@ package com.pjsoft.mapeopiano
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
-import android.view.MotionEvent
 import android.view.View
-import kotlin.math.floor
 
 class PianoView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    private val NUM_WHITE_KEYS = 14
+    // ======== Estado de teclas tocadas ==========
+    private val whiteKeysPressed = HashMap<Int, Boolean>()
+    private val blackKeysPressed = HashMap<Int, Boolean>()
 
-    // Patrón de teclas negras (para 14 teclas blancas)
-    private val BLACK_KEYS_PATTERN = booleanArrayOf(
-        true, true, false,
-        true, true, true, false,
-        true, true, false,
-        true, true, true, false
-    )
+    // ======== Datos detectados por PianoDetector ==========
+    private var detectedPianoRect: Rect? = null
+    private var detectedKeys: List<DetectedKey> = emptyList()
 
-    // Estado de teclas
-    private val whiteKeysPressed = BooleanArray(NUM_WHITE_KEYS)
-    private val blackKeysPressed = BooleanArray(BLACK_KEYS_PATTERN.size)
+    // ======== Posición del dedo detectado por IA ==========
+    private var fingerX = -1f
+    private var fingerY = -1f
 
     private val fingerPaint = Paint().apply {
         color = Color.RED
         style = Paint.Style.FILL
     }
 
-
-    // Posición del dedo desde la cámara
-    private var fingerX = -1f
-    private var fingerY = -1f
-
-    // ====== COLORES ======
-    private val whiteKeyPaint = Paint().apply {
-        color = Color.WHITE
-        style = Paint.Style.FILL
-        isAntiAlias = true
+    // ======== Colores ========
+    private val pianoRectPaint = Paint().apply {
+        color = Color.GREEN
+        strokeWidth = 5f
+        style = Paint.Style.STROKE
     }
 
-    private val whiteKeyPressedPaint = Paint().apply {
-        color = Color.parseColor("#FFEB3B")
-        style = Paint.Style.FILL
-    }
-
+    private val whiteKeyPaint = Paint().apply { color = Color.WHITE }
+    private val whiteKeyPressedPaint = Paint().apply { color = Color.parseColor("#FFEB3B") }
     private val whiteKeyBorderPaint = Paint().apply {
-        color = Color.parseColor("#9E9E9E")
+        color = Color.DKGRAY
+        strokeWidth = 3f
+        style = Paint.Style.STROKE
+    }
+
+    private val blackKeyPaint = Paint().apply { color = Color.BLACK }
+    private val blackKeyPressedPaint = Paint().apply { color = Color.parseColor("#555555") }
+
+    private val detectedKeyPaint = Paint().apply {
+        color = Color.CYAN
         strokeWidth = 4f
         style = Paint.Style.STROKE
     }
 
-    private val blackKeyPaint = Paint().apply {
-        color = Color.parseColor("#222222")
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-
-    private val blackKeyPressedPaint = Paint().apply {
-        color = Color.parseColor("#616161")
-        style = Paint.Style.FILL
-    }
-
     // ============================================================
-    //              MÉTODO PARA MANO (MediaPipe)
+    //      MÉTODOS EXPUESTOS PARA MainActivity / PianoDetector
     // ============================================================
-    fun updateFingerPosition(x: Float, y: Float) {
-        fingerX = x
-        fingerY = y
-        detectKeyFromFinger()   // detectar teclas
+
+    fun updateDetectedPianoRect(rect: Rect) {
+        detectedPianoRect = rect
         invalidate()
     }
 
+    fun updateDetectedKeys(keys: List<DetectedKey>) {
+        detectedKeys = keys
+        invalidate()
+    }
+
+    fun updateFingerPosition(x: Float, y: Float) {
+        fingerX = x
+        fingerY = y
+        detectKeyFromFinger()
+        invalidate()
+    }
+
+    // ============================================================
+    //                  DETECCIÓN DEL DEDO EN EL PIANO
+    // ============================================================
     private fun detectKeyFromFinger() {
         if (fingerX < 0 || fingerY < 0) return
+        val rect = detectedPianoRect ?: return
 
-        val whiteKeyWidth = width / NUM_WHITE_KEYS.toFloat()
-        val blackKeyWidth = whiteKeyWidth * 0.6f
-        val blackKeyHeight = height * 0.6f
+        // Resetear todo
+        whiteKeysPressed.clear()
+        blackKeysPressed.clear()
 
-        // Resetar teclas
-        whiteKeysPressed.fill(false)
-        blackKeysPressed.fill(false)
-
-        // 1) Primero teclas negras (tienen prioridad visual)
-        for (i in BLACK_KEYS_PATTERN.indices) {
-            if (!BLACK_KEYS_PATTERN[i]) continue
-
-            val centerX = (i + 1) * whiteKeyWidth
-            val left = centerX - blackKeyWidth / 2
-            val right = centerX + blackKeyWidth / 2
-
-            if (fingerX in left..right && fingerY < blackKeyHeight) {
-                blackKeysPressed[i] = true
-                return
-            }
+        // Si el dedo no está dentro del piano
+        if (!rect.contains(fingerX.toInt(), fingerY.toInt())) {
+            return
         }
 
-        // 2) Si no tocó una negra, verificar blanca
-        val whiteIndex = floor(fingerX / whiteKeyWidth).toInt()
-        if (whiteIndex in 0 until NUM_WHITE_KEYS) {
-            whiteKeysPressed[whiteIndex] = true
+        // Revisar cada tecla detectada por el Detector
+        for (key in detectedKeys) {
+            if (key.rect.contains(fingerX, fingerY)) {
+                if (key.isBlack) {
+                    blackKeysPressed[key.index] = true
+                } else {
+                    whiteKeysPressed[key.index] = true
+                }
+                return
+            }
         }
     }
 
     // ============================================================
-    //              DIBUJO DEL PIANO
+    //                          DIBUJO
     // ============================================================
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val whiteKeyWidth = width / NUM_WHITE_KEYS.toFloat()
-        val blackKeyWidth = whiteKeyWidth * 0.6f
-        val blackKeyHeight = height * 0.6f
-
-        // --- DIBUJAR TECLAS BLANCAS ---
-        for (i in 0 until NUM_WHITE_KEYS) {
-            val left = i * whiteKeyWidth
-            val right = left + whiteKeyWidth
-
-            val paintToUse =
-                if (whiteKeysPressed[i]) whiteKeyPressedPaint else whiteKeyPaint
-
-            canvas.drawRect(left, 0f, right, height.toFloat(), paintToUse)
-            canvas.drawRect(left, 0f, right, height.toFloat(), whiteKeyBorderPaint)
+        // (1) Rectángulo detectado
+        detectedPianoRect?.let {
+            canvas.drawRect(it, pianoRectPaint)
         }
 
-        // --- DIBUJAR TECLAS NEGRAS ---
-        for (i in BLACK_KEYS_PATTERN.indices) {
-            if (!BLACK_KEYS_PATTERN[i]) continue
-
-            val centerX = (i + 1) * whiteKeyWidth
-            val left = centerX - blackKeyWidth / 2
-            val right = centerX + blackKeyWidth / 2
-
-            val paintToUse =
-                if (blackKeysPressed[i]) blackKeyPressedPaint else blackKeyPaint
-
-            canvas.drawRect(left, 0f, right, blackKeyHeight, paintToUse)
+        // (2) Teclas detectadas
+        detectedKeys.forEach { key ->
+            canvas.drawRect(key.rect, detectedKeyPaint)
         }
 
+        // (3) Teclas presionadas – blancas
+        for ((index, pressed) in whiteKeysPressed) {
+            if (pressed) {
+                val key = detectedKeys.firstOrNull { !it.isBlack && it.index == index }
+                key?.let {
+                    canvas.drawRect(it.rect, whiteKeyPressedPaint)
+                }
+            }
+        }
+
+        // (4) Teclas presionadas – negras
+        for ((index, pressed) in blackKeysPressed) {
+            if (pressed) {
+                val key = detectedKeys.firstOrNull { it.isBlack && it.index == index }
+                key?.let {
+                    canvas.drawRect(it.rect, blackKeyPressedPaint)
+                }
+            }
+        }
+
+        // (5) Dedo detectado
         if (fingerX >= 0 && fingerY >= 0) {
-            canvas.drawCircle(fingerX, fingerY, 20f, fingerPaint)
+            canvas.drawCircle(fingerX, fingerY, 15f, fingerPaint)
         }
-
-    }
-
-    // ============================================================
-    //              SOPORTE A TOCAR CON EL DEDO
-    // ============================================================
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        val x = event.x
-        val y = event.y
-
-        val whiteKeyWidth = width / NUM_WHITE_KEYS.toFloat()
-        val blackKeyWidth = whiteKeyWidth * 0.6f
-        val blackKeyHeight = height * 0.6f
-
-        when (event.action) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                whiteKeysPressed.fill(false)
-                blackKeysPressed.fill(false)
-
-                // Teclas negras primero
-                for (i in BLACK_KEYS_PATTERN.indices) {
-                    if (!BLACK_KEYS_PATTERN[i]) continue
-
-                    val centerX = (i + 1) * whiteKeyWidth
-                    val left = centerX - blackKeyWidth / 2
-                    val right = centerX + blackKeyWidth / 2
-
-                    if (x in left..right && y < blackKeyHeight) {
-                        blackKeysPressed[i] = true
-                        invalidate()
-                        return true
-                    }
-                }
-
-                // Teclas blancas
-                val index = floor(x / whiteKeyWidth).toInt()
-                if (index in 0 until NUM_WHITE_KEYS) {
-                    whiteKeysPressed[index] = true
-                }
-
-                invalidate()
-            }
-
-            MotionEvent.ACTION_UP -> {
-                whiteKeysPressed.fill(false)
-                blackKeysPressed.fill(false)
-                invalidate()
-            }
-        }
-
-        return true
     }
 }
