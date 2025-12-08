@@ -151,62 +151,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // kotlin
     fun detectKeys(src: Bitmap, pianoRect: Rect): List<DetectedKey> {
-        val w = src.width
-        val h = src.height
-
-        val gray = bitmapToGray(src)
-
-        val px = pianoRect.left
-        val py = pianoRect.top
-        val pw = pianoRect.width()
-        val ph = pianoRect.height()
-
-        if (pw <= 0 || ph <= 0) return emptyList()
-
-        val whiteKeyCount = 52  // moderno, 88 teclas totales
-        val keyWidth = pw.toFloat() / whiteKeyCount
-
-        val result = mutableListOf<DetectedKey>()
-
-        for (i in 0 until whiteKeyCount) {
-            val x1 = (px + i * keyWidth).toInt()
-            val x2 = (px + (i + 1) * keyWidth).toInt()
-
-            val y1 = py
-            val y2 = py + ph
-
-            // medir oscuridad (solo parte superior)
-            var sum = 0
-            var count = 0
-
-            val sampleTop = (ph * 0.25f).toInt()
-
-            for (y in y1 until (y1 + sampleTop)) {
-                for (x in x1 until x2) {
-                    val idx = y * w + x
-                    if (idx in gray.indices) {
-                        sum += gray[idx]
-                        count++
-                    }
-                }
-            }
-
-            val avg = if (count > 0) sum / count else 255
-
-            val isBlack = avg < 80  // umbral de oscuridad típico para teclas negras
-
-            result.add(
-                DetectedKey(
-                    index = i,
-                    rect = RectF(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat()),
-                    isBlack = isBlack
-                )
-            )
-        }
-
-        return result
+        return pianoDetector.detectKeys(src, pianoRect)
     }
+
 
 
     private fun handleHandResult(result: HandLandmarkerResult) {
