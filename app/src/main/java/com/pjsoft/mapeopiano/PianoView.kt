@@ -142,4 +142,15 @@ class PianoView @JvmOverloads constructor(
             canvas.drawCircle(fingerX, fingerY, 15f, fingerPaint)
         }
     }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val desiredWidth = 800   // el tamaño real que quieres que tenga el piano
+        val desiredHeight = 200  // ya lo tienes fijo en el layout
+
+        val width = resolveSize(desiredWidth, widthMeasureSpec)
+        val height = resolveSize(desiredHeight, heightMeasureSpec)
+
+        setMeasuredDimension(width, height)
+    }
+
 }
